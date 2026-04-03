@@ -88,13 +88,18 @@ Not every task needs all phases. A bug fix skips THINK. A library evaluation ski
 ## Quick Start
 
 ```bash
-# Install everything
-cp -r agents/ your-project/.claude/agents/
-cp -r commands/ your-project/.claude/commands/
-cp -r skills/ your-project/.claude/skills/
-cp -r rules/ your-project/.claude/rules/
-# Merge hooks/hooks.json into .claude/settings.json
+# Clone
+git clone https://github.com/codebysantosh-eng/claude-forge.git
+cd claude-forge
+
+# Install globally (available in all projects)
+./install.sh
+
+# Or install to a specific project
+./install.sh --project /path/to/your-project
 ```
+
+> **Hooks** require manual setup — merge `hooks/hooks.json` into your `.claude/settings.json`.
 
 ## Philosophy
 
