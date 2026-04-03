@@ -1,0 +1,108 @@
+{
+  "description": "Claude Forge — automated safety net for development sessions.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "id": "block-hook-bypass",
+        "description": "Block --no-verify and bypass flags in git commands",
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=i.tool_input?.command||'';if(/--no-verify|--no-gpg-sign/.test(c)&&/git\\s+(commit|push|merge|rebase)/.test(c)){console.log(JSON.stringify({decision:'block',reason:'Hook bypass flags are not allowed. Fix the underlying issue instead.'}));}process.exit(0)\""
+          }
+        ]
+      },
+      {
+        "id": "pre-commit-scan",
+        "description": "Block commits containing secrets, console.log, or debugger in staged changes",
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=i.tool_input?.command||'';if(!/git\\s+commit/.test(c)){process.exit(0);}const{execSync}=require('child_process');try{const d=execSync('git diff --cached --diff-filter=ACM',{encoding:'utf8'});const issues=[];if(/(?:api[_-]?key|secret[_-]?key|password|token|credentials|private[_-]?key)\\s*[:=]\\s*['\\\"][^'\\\"\\s]{8,}/i.test(d))issues.push('Possible hardcoded secret');let logs=0;d.split('\\n').forEach(l=>{if(l.startsWith('+')&&!l.startsWith('+++')){if(/console\\.log\\(/.test(l))logs++;if(/\\bdebugger\\b/.test(l))issues.push('debugger statement found');}});if(logs>0)issues.push(logs+' console.log(s)');if(issues.length)console.log(JSON.stringify({decision:'block',reason:'Pre-commit scan failed:\\n- '+issues.join('\\n- ')}));}catch(e){}process.exit(0)\""
+          }
+        ]
+      },
+      {
+        "id": "block-force-push",
+        "description": "Block git push --force (use --force-with-lease instead)",
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=i.tool_input?.command||'';if(/git\\s+push.*--force(?!-)/.test(c)){console.log(JSON.stringify({decision:'block',reason:'Force push blocked. Use --force-with-lease for safety.'}));}process.exit(0)\""
+          }
+        ]
+      },
+      {
+        "id": "config-guard",
+        "description": "Warn before modifying linter, formatter, or CI config files",
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const f=i.tool_input?.file_path||'';const p=['.eslintrc','.prettierrc','tsconfig.json','biome.json','.github/workflows','jest.config','vitest.config'];const h=p.find(x=>f.includes(x));if(h)console.log(JSON.stringify({message:'Modifying config: '+h+'. Ensure this is intentional.'}));process.exit(0)\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "id": "console-log-warn",
+        "description": "Warn if console.log was added (skips test files)",
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=i.tool_input?.new_string||i.tool_input?.content||'';const f=i.tool_input?.file_path||'';if(/\\.(test|spec|stories)\\.[jt]sx?$/.test(f))process.exit(0);if(/console\\.log\\(/.test(c))console.log(JSON.stringify({message:'console.log detected in '+f.split('/').pop()+'. Remove before committing.'}));process.exit(0)\""
+          }
+        ]
+      },
+      {
+        "id": "build-fail-hint",
+        "description": "Suggest /fix when build commands fail",
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const c=i.tool_input?.command||'';if(/npm run build|npx tsc|cargo build|go build|mvn compile|gradle.*build/.test(c)&&(i.tool_output?.exit_code||0)!==0)console.log(JSON.stringify({message:'Build failed. Run /fix to resolve errors incrementally.'}));process.exit(0)\""
+          }
+        ]
+      },
+      {
+        "id": "large-file-warn",
+        "description": "Warn when an edited file exceeds 800 lines",
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const i=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));const f=i.tool_input?.file_path;if(!f)process.exit(0);try{const lines=require('fs').readFileSync(f,'utf8').split('\\n').length;if(lines>800)console.log(JSON.stringify({message:f.split('/').pop()+' is '+lines+' lines (limit: 800). Consider splitting by responsibility.'}));}catch(e){}process.exit(0)\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "id": "console-log-audit",
+        "description": "Audit modified source files for console.log at end of each response",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"try{const{execSync}=require('child_process');const files=execSync('git diff --name-only --diff-filter=ACM HEAD 2>/dev/null',{encoding:'utf8'}).trim().split('\\n').filter(f=>/\\.[jt]sx?$/.test(f)&&!/\\.(test|spec|stories)\\./.test(f));if(!files.length)process.exit(0);const hits=[];for(const f of files){try{require('fs').readFileSync(f,'utf8').split('\\n').forEach((l,n)=>{if(/console\\.log\\(/.test(l))hits.push(f+':'+(n+1));})}catch(e){}}if(hits.length)console.log(JSON.stringify({message:'console.log in source files:\\n'+hits.join('\\n')}));}catch(e){}process.exit(0)\""
+          }
+        ]
+      },
+      {
+        "id": "test-reminder",
+        "description": "Remind to add tests if source files changed but no test files were touched",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"try{const{execSync}=require('child_process');const files=execSync('git diff --name-only --diff-filter=ACM HEAD 2>/dev/null',{encoding:'utf8'}).trim().split('\\n').filter(Boolean);const src=files.filter(f=>/\\.[jt]sx?$/.test(f)&&!/\\.(test|spec|stories)\\./.test(f)&&!/config/.test(f));const tests=files.filter(f=>/\\.(test|spec)\\.[jt]sx?$/.test(f));if(src.length>0&&tests.length===0)console.log(JSON.stringify({message:'Source files changed but no test files modified. Did you add tests? Run /tdd to add coverage.'}));}catch(e){}process.exit(0)\""
+          }
+        ]
+      }
+    ]
+  }
+}
